@@ -67,6 +67,20 @@ namespace cuda {
     return value;
   }
 
+  // prun: added nn_interp just to check
+  template <typename DType>
+  __device__ DType nearest_interp(
+    const DType* data,
+    const DType x,
+    const DType y,
+    const int width,
+    const int height) {
+    int x1 = round(x);
+    int y1 = round(y);
+    return data[y1 * width + x1];
+  }
+
+
   template <typename DType>
   __global__ void DeformablePSROIPoolForwardKernel(
     const int count,
@@ -150,7 +164,9 @@ namespace cuda {
           w = min(max(w, 0.), width - 1.);
           h = min(max(h, 0.), height - 1.);
           int c = (ctop*group_size + gh)*group_size + gw;
-          DType val = bilinear_interp(offset_bottom_data + c*height*width, w, h, width, height);
+          // prun: change bilinear interp onto nearest
+          //DType val = bilinear_interp(offset_bottom_data + c*height*width, w, h, width, height);
+          DType val = nearest_interp(offset_bottom_data + c*height*width, w, h, width, height);
           sum += val;
           count++;
         }

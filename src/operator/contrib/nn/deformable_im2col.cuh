@@ -112,6 +112,18 @@ __device__ DType deformable_im2col_bilinear(const DType* bottom_data, const int 
   return val;
 }
 
+// prun: added deformable_im2col_nearest
+template <typename DType>
+__device__ DType deformable_im2col_nearest(const DType* bottom_data, const int data_width,
+  const int height, const int width, DType h, DType w) {
+
+  int hi = round(h);
+  int wi = round(w);
+  hi = hi > (height - 1) ? height - 1 : hi;
+  wi = wi > (width - 1) ? width - 1 : wi;
+  return bottom_data[hi * data_width + wi];
+}
+
 
 template <typename DType>
 __device__ DType get_gradient_weight(DType argmax_h, DType argmax_w,
@@ -252,7 +264,9 @@ __global__ void deformable_im2col_gpu_kernel(const int n, const DType* data_im, 
           const DType map_w = j * dilation_w + offset_w;
           const int cur_height = height - h_in;
           const int cur_width = width - w_in;
-          val = deformable_im2col_bilinear(data_im_ptr, width, cur_height, cur_width, map_h, map_w);
+          // prun: change bilinear interpolation to nearest neighbour
+          //val = deformable_im2col_bilinear(data_im_ptr, width, cur_height, cur_width, map_h, map_w);
+          val = deformable_im2col_nearest(data_im_ptr, width, cur_height, cur_width, map_h, map_w);
         }
         *data_col_ptr = val;
         data_col_ptr += height_col * width_col;
