@@ -43,6 +43,9 @@ for (int i = blockIdx.x * blockDim.x + threadIdx.x; \
       i < (n); \
       i += blockDim.x * gridDim.x)
 
+
+#define DEFORMABLE_NEAREST_NEIGHBOUR
+
 namespace mshadow {
 namespace cuda {
   template <typename DType>
@@ -164,9 +167,12 @@ namespace cuda {
           w = min(max(w, 0.), width - 1.);
           h = min(max(h, 0.), height - 1.);
           int c = (ctop*group_size + gh)*group_size + gw;
+          #ifndef DEFORMABLE_NEAREST_NEIGHBOUR
           // prun: change bilinear interp onto nearest
-          //DType val = bilinear_interp(offset_bottom_data + c*height*width, w, h, width, height);
+          DType val = bilinear_interp(offset_bottom_data + c*height*width, w, h, width, height);
+          #else //DEFORMABLE_NEAREST_NEIGHBOUR
           DType val = nearest_interp(offset_bottom_data + c*height*width, w, h, width, height);
+          #endif //DEFORMABLE_NEAREST_NEIGHBOUR 
           sum += val;
           count++;
         }
@@ -297,14 +303,18 @@ namespace cuda {
         for (int iw = 0; iw < sample_per_part; iw++) {
           DType w = wstart + iw*sub_bin_size_w;
           DType h = hstart + ih*sub_bin_size_h;
-          // bilinear interpolation
           if (w<-0.5 || w>width - 0.5 || h<-0.5 || h>height - 0.5) {
             continue;
           }
           w = min(max(w, 0.), width - 1.);
           h = min(max(h, 0.), height - 1.);
           int c = (ctop*group_size + gh)*group_size + gw;
+          int bottom_index_base = c * height *width;
           // backward on feature
+          
+          // bilinear interpolation
+          #ifndef DEFORMABLE_NEAREST_NEIGHBOUR
+
           int x0 = floor(w);
           int x1 = ceil(w);
           int y0 = floor(h);
@@ -314,15 +324,20 @@ namespace cuda {
           DType q01 = (1 - dist_x)*dist_y;
           DType q10 = dist_x*(1 - dist_y);
           DType q11 = dist_x*dist_y;
-          int bottom_index_base = c * height *width;
           atomicAdd(offset_bottom_data_diff + bottom_index_base + y0*width + x0, q00*diff_val);
           atomicAdd(offset_bottom_data_diff + bottom_index_base + y1*width + x0, q01*diff_val);
           atomicAdd(offset_bottom_data_diff + bottom_index_base + y0*width + x1, q10*diff_val);
           atomicAdd(offset_bottom_data_diff + bottom_index_base + y1*width + x1, q11*diff_val);
+          #else //DEFORMABLE_NEAREST_NEIGHBOUR
+          int x = round(w);
+          int y = round(h);
 
+          atomicAdd(offset_bottom_data_diff + bottom_index_base + y*width + x, diff_val);
+          #endif //DEFORMABLE_NEAREST_NEIGHBOUR
           if (no_trans) {
             continue;
           }
+          #ifndef DEFORMABLE_NEAREST_NEIGHBOUR
           DType U00 = offset_bottom_data[bottom_index_base + y0*width + x0];
           DType U01 = offset_bottom_data[bottom_index_base + y1*width + x0];
           DType U10 = offset_bottom_data[bottom_index_base + y0*width + x1];
@@ -333,7 +348,15 @@ namespace cuda {
           DType diff_y = (U11*dist_x + U01*(1 - dist_x) - U10*dist_x - U00*(1 - dist_x))
             *trans_std*diff_val;
           diff_y *= roi_height;
+          #else //DEFORMABLE_NEAREST_NEIGHBOUR
+          DType U = offset_bottom_data[bottom_index_base + y*width + x];
 
+          DType diff_x = U*trans_std*diff_val;
+          diff_x *= roi_width;
+          DType diff_y = U*trans_std*diff_val;
+          diff_y *= roi_height;
+          #endif //DEFORMABLE_NEAREST_NEIGHBOUR
+          
           atomicAdd(bottom_trans_diff + (((n * num_classes + class_id) * 2)
                                            * part_size + part_h)
                                            * part_size + part_w, diff_x);

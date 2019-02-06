@@ -70,6 +70,7 @@
 #include "../../../common/cuda_utils.h"
 
 
+#define DEFORMABLE_NEAREST_NEIGHBOUR
 
 namespace mxnet {
 namespace op {
@@ -173,6 +174,26 @@ __device__ DType get_gradient_weight(DType argmax_h, DType argmax_w,
 
 
 template <typename DType>
+__device__ DType get_gradient_weight_nearest(DType argmax_h, DType argmax_w,
+  const int h, const int w, const int height, const int width) {
+
+  if (argmax_h < 0 || argmax_h >= height || argmax_w < 0 || argmax_w >= width) {
+    //empty
+    return 0;
+  }
+
+
+  int argmax_h_ = (int)round(argmax_h);
+  int argmax_w_ = (int)round(argmax_w);
+
+  if (argmax_h_ == h && argmax_w_ == w)
+    return DType(1.0);
+  return DType(0.0);
+  }
+
+
+
+template <typename DType>
 __device__ DType get_coordinate_weight(DType argmax_h, DType argmax_w,
   const int height, const int width, const DType* im_data,
   const int data_width, const int bp_dir) {
@@ -218,6 +239,27 @@ __device__ DType get_coordinate_weight(DType argmax_h, DType argmax_w,
 
   return weight;
 }
+
+
+
+template <typename DType>
+__device__ DType get_coordinate_weight_nearest(DType argmax_h, DType argmax_w,
+  const int height, const int width, const DType* im_data,
+  const int data_width, const int bp_dir) {
+
+  if (argmax_h < 0 || argmax_h >= height || argmax_w < 0 || argmax_w >= width)
+  {
+    //empty
+    return 0;
+  }
+
+
+  int argmax_h_ = (int)round(argmax_h);
+  int argmax_w_ = (int)round(argmax_w);
+  return im_data[argmax_h_ * data_width + argmax_w_];
+}
+
+
 
 
 /*!
@@ -369,7 +411,12 @@ __global__ void deformable_col2im_gpu_kernel(const int n, const DType* data_col,
           abs(cur_inv_w_data - (cur_w + dx)) < 1
           ) {
           int cur_bottom_grad_pos = (c * height + cur_h + dy) * width + cur_w + dx;
+          #ifndef DEFORMABLE_NEAREST_NEIGHBOUR 
           DType weight = get_gradient_weight(cur_inv_h_data, cur_inv_w_data, cur_h + dy, cur_w + dx, height, width);
+          #else // DEFORMABLE_NEAREST_NEIGHBOUR
+          DType weight = get_gradient_weight_nearest(cur_inv_h_data, cur_inv_w_data, cur_h + dy,
+                                                     cur_w + dx, height, width);
+          #endif // DEFORMABLE_NEAREST_NEIGHBOUR
           atomicAdd(grad_im + cur_bottom_grad_pos, weight * cur_top_grad);
         }
       }
@@ -475,9 +522,16 @@ __global__ void deformable_col2im_coord_gpu_kernel(const int n, const DType* dat
       if (inv_h < 0 || inv_w < 0 || inv_h >= height || inv_w >= width) {
         inv_h = inv_w = -1;
       }
+      #ifndef DEFORMABLE_NEAREST_NEIGHBOUR
       const DType weight = get_coordinate_weight(
         inv_h, inv_w,
         height, width, data_im_ptr + cnt * height * width, width, bp_dir);
+      #else // DEFORMABLE_NEAREST_NEIGHBOUR
+
+      const DType weight = get_coordinate_weight_nearest(
+        inv_h, inv_w,
+        height, width, data_im_ptr + cnt * height * width, width, bp_dir);
+      #endif // DEFORMABLE_NEAREST_NEIGHBOUR
       val += weight * data_col_ptr[col_pos];
       cnt += 1;
     }
